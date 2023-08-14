@@ -1,0 +1,67 @@
+provider "aws" {
+  region = "us-east-1"  # Change to your desired region
+}
+
+resource "aws_lambda_function" "s3_json_retrieval" {
+  filename      = "lambda_function.zip"  # Path to your Lambda deployment package
+  function_name = "S3JsonRetrievalFunction"
+  role          = "arn:aws:iam::YOUR_ACCOUNT_ID:role/YourLambdaRole"  # Replace with the actual role ARN
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.8"
+}
+
+resource "aws_api_gateway_rest_api" "s3_json_api" {
+  name        = "S3JsonApi"
+  description = "API for retrieving JSON content from S3"
+}
+
+resource "aws_api_gateway_resource" "resource" {
+  rest_api_id = aws_api_gateway_rest_api.s3_json_api.id
+  parent_id   = aws_api_gateway_rest_api.s3_json_api.root_resource_id
+  path_part   = "resource"
+}
+
+resource "aws_api_gateway_method" "method" {
+  rest_api_id   = aws_api_gateway_rest_api.s3_json_api.id
+  resource_id   = aws_api_gateway_resource.resource.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_lambda_permission" "apigw" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.s3_json_retrieval.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "arn:aws:execute-api:${var.region}:${var.account_id}:${aws_api_gateway_rest_api.s3_json_api.id}/*/*/*"
+}
+
+resource "aws_api_gateway_integration" "integration" {
+  rest_api_id             = aws_api_gateway_rest_api.s3_json_api.id
+  resource_id             = aws_api_gateway_resource.resource.id
+  http_method             = aws_api_gateway_method.method.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.s3_json_retrieval.invoke_arn
+}
+
+resource "aws_api_gateway_method_response" "response_200" {
+  rest_api_id = aws_api_gateway_rest_api.s3_json_api.id
+  resource_id = aws_api_gateway_resource.resource.id
+  http_method = aws_api_gateway_method.method.http_method
+  status_code = "200"
+}
+
+resource "aws_api_gateway_integration_response" "response_200" {
+  rest_api_id       = aws_api_gateway_rest_api.s3_json_api.id
+  resource_id       = aws_api_gateway_resource.resource.id
+  http_method       = aws_api_gateway_method.method.http_method
+  status_code       = aws_api_gateway_method_response.response_200.status_code
+  response_templates = {
+    "application/json" = jsonencode({})  # Empty JSON response
+  }
+}
+
+output "api_endpoint" {
+  value = aws_api_gateway_rest_api.s3_json_api.invoke_url
+}
